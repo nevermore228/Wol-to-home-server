@@ -6,6 +6,8 @@ from wakeonlan import send_magic_packet
 import time
 import threading
 import os
+from Scanner_script import scanner_script
+
 
 # Настройки сервера
 MAC_ADDRESS = '00:11:22:33:44:55'  # Замените на реальный MAC-адрес сервера
@@ -64,7 +66,7 @@ def start_scan():
     threading.Thread(target=run_scan).start()
 
 def run_scan():
-    scan_doc()
+    scanner_script()
     btn_scan.config(state=tk.NORMAL)
 
 # Основное окно
