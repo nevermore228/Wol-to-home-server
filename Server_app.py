@@ -1,19 +1,41 @@
 import tkinter as tk
+from datetime import datetime
 from tkinter import messagebox
-
 import paramiko
 from wakeonlan import send_magic_packet
 import time
 import threading
 import os
-from Scanner_script import scanner_script
+import logging
 
 
 # Настройки сервера
 MAC_ADDRESS = '00:11:22:33:44:55'  # Замените на реальный MAC-адрес сервера
-SERVER_IP = '192.168.1.100'  # IP-адрес сервера
-SERVER_USER = 'user'  # Имя пользователя сервера
-SERVER_PASSWORD = 'password'  # Пароль от сервера
+HOSTNAME = '192.168.1.100'  # IP-адрес сервера
+USERNAME = 'user'  # Имя пользователя сервера
+PASSWORD = 'password'  # Пароль от сервера
+LOGFILE = 'app.log'
+
+
+
+
+
+# Проверяем, существует ли файл, если нет — создаем его
+if not os.path.exists(LOGFILE):
+    with open(LOGFILE, 'w') as file:
+        file.write('')  # Создаем пустой файл
+
+# Настраиваем логирование
+logging.basicConfig(
+    filename=LOGFILE,  # Имя файла для логов
+    level=logging.INFO,  # Уровень логирования
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
+)
+# Пример записи лога
+#logging.info('Программа запущена.')
+#logging.warning('Это предупреждение.')
+#logging.error('Произошла ошибка.')
+
 
 # Функция отправки WOL пакета
 def send_wol():
@@ -23,16 +45,18 @@ def send_wol():
         check_server_status()
     except Exception as e:
         messagebox.showerror("Ошибка", f"Не удалось отправить WOL пакет: {e}")
+        logging.error(f"Не удалось отправить WOL пакет: {e}")
+
 
 # Функция выключения сервера
 def shutdown_server():
     try:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(SERVER_IP, username=SERVER_USER, password=SERVER_PASSWORD)
+        ssh.connect(HOSTNAME, username=USERNAME, password=PASSWORD)
 
         stdin, stdout, stderr = ssh.exec_command('sudo shutdown now')
-        stdin.write(SERVER_PASSWORD + '\n')  # Отправляем пароль для выполнения sudo
+        stdin.write(PASSWORD + '\n')  # Отправляем пароль для выполнения sudo
         stdin.flush()
 
         stdout.channel.recv_exit_status()  # Ожидаем завершения команды
@@ -42,15 +66,18 @@ def shutdown_server():
         check_server_status()
     except Exception as e:
         messagebox.showerror("Ошибка", f"Не удалось выключить сервер: {e}")
+        logging.error(f"Не удалось выключить сервер: {e}")
+
 
 # Функция сканирования документа (эмуляция)
 def scan_doc():
     time.sleep(10)  # Эмуляция времени сканирования
     messagebox.showinfo("Сканирование", "Документ отсканирован!")
 
+
 # Обновление состояния сервера
 def check_server_status():
-    response = os.system(f"ping -c 1 {SERVER_IP} > /dev/null 2>&1")
+    response = os.system(f"ping {HOSTNAME} -n 1")
     if response == 0:
         status_label.config(text="Сервер включен", fg="green")
         btn_wake.config(state=tk.DISABLED)
@@ -66,9 +93,95 @@ def start_scan():
     threading.Thread(target=run_scan).start()
 
 def run_scan():
-    scanner_script()
+    try:
+        scanner_script()
+    except Exception as e:
+        logging.error(f"Не удалось отcканировать: {e}")
     btn_scan.config(state=tk.NORMAL)
 
+
+def cur_date_time():
+    current_datetime = datetime.now().strftime("%d-%m-%Y___%H-%M-%S")
+    return current_datetime
+
+
+cur_dt = cur_date_time()
+scan_path = f"/Scans/scan-{cur_dt}.png"
+
+
+# Функция для выполнения команды и получения устройства
+def get_scan_device():
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        # Подключаемся к серверу
+        client.connect(HOSTNAME, username=USERNAME, password=PASSWORD)
+
+        # Выполняем команду 'scanimage -L'
+        stdin, stdout, stderr = client.exec_command('scanimage -L')
+
+        output = stdout.read().decode('utf-8')
+        errors = stderr.read().decode('utf-8')
+
+        if errors:
+            raise Exception(f"Error occurred: {errors}")
+
+        # Используем регулярное выражение для извлечения устройства из вывода
+        print(output)
+        start = output.find("`") + 1
+        end = output.find("'", start)
+
+        if start > 0 and end > start:
+            device_temp = output[start:end]
+            return device_temp
+
+        else:
+            raise Exception("No device found in scanimage output.")
+
+    finally:
+        client.close()
+
+
+# Функция для выполнения команды сканирования
+def scan_image(device_temp):
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        # Подключаемся к серверу
+        client.connect(HOSTNAME, username=USERNAME, password=PASSWORD)
+
+        # Формируем команду сканирования
+        command = f'scanimage --device="{device_temp}" --resolution=200 --format=png > "{scan_path}"'
+
+        stdin, stdout, stderr = client.exec_command(command)
+
+        output = stdout.read().decode('utf-8')
+        errors = stderr.read().decode('utf-8')
+
+        if errors:
+            raise Exception(f"Error occurred during scanning: {errors}")
+
+        print(f"Scan completed successfully. File saved to {scan_path}")
+
+    finally:
+        client.close()
+
+
+def scanner_script():
+    try:
+        device_temp = get_scan_device()  # Получаем устройство
+        scan_image(device_temp)  # Выполняем сканирование
+    except Exception as e:
+        print(str(e))
+
+
+
+
+
+
+#_____________________________TKINTER__________________________
 # Основное окно
 root = tk.Tk()
 root.title("Домашний сервер")
